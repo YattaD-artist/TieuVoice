@@ -1,3 +1,107 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Tiêu Meow Live</title>
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ff9800">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            background: #0f0f0f;
+            color: #eee;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .card {
+            background: #1a1a1a;
+            padding: 2.5rem;
+            border-radius: 40px;
+            width: 320px;
+            text-align: center;
+            border: 1px solid #333;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        h1 {
+            color: #ff9800;
+            font-size: 1.1rem;
+            margin-bottom: 1.8rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .controls-row {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .tiger-btn {
+            width: 100px;
+            height: 100px;
+            background: #252525;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 50px;
+            border: 4px solid #333;
+            user-select: none;
+        }
+
+        .circle-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: #333;
+            border: 2px solid #ff9800;
+            color: #ff9800;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: 0.3s;
+        }
+
+        .live-active {
+            background: #ff9800 !important;
+            color: #000 !important;
+            box-shadow: 0 0 20px rgba(255,152,0,0.6);
+        }
+
+        .playing {
+            animation: pulse 1s infinite;
+            border-color: #ff9800;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255,152,0,0.4); }
+            70% { box-shadow: 0 0 0 20px rgba(255,152,0,0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,152,0,0); }
+        }
+
+        #status {
+            font-size: 0.75rem;
+            color: #ff9800;
+        }
+    </style>
+</head>
+
+<body>
+
 <div class="card">
     <h1>Tiêu Meow Live</h1>
 
@@ -8,3 +112,71 @@
 
     <div id="status">Sẵn sàng</div>
 </div>
+
+<script>
+const CONFIG = {
+    gate: -45,
+    pitch: 8,
+    vibFreq: 4,
+    vibDepth: 0.8,
+    reverbWet: 0.15,
+    micGain: 3.0
+};
+
+let isLive = false;
+
+const mic = new Tone.UserMedia();
+const micGain = new Tone.Gain(CONFIG.micGain);
+let liveNodes = [];
+
+function createChain(destination) {
+    const gate = new Tone.Gate(CONFIG.gate);
+    const pitch = new Tone.PitchShift(CONFIG.pitch);
+    const vibrato = new Tone.Vibrato(CONFIG.vibFreq, CONFIG.vibDepth);
+    const chorus = new Tone.Chorus(4, 2.5, 0.5).start();
+    const filter = new Tone.Filter(2200, "lowpass");
+    const reverb = new Tone.Reverb({ decay: 1.5, wet: CONFIG.reverbWet });
+
+    gate.chain(pitch, vibrato, chorus, filter, reverb, destination);
+    return [gate, pitch, vibrato, chorus, filter, reverb];
+}
+
+document.getElementById("liveBtn").onclick = async function () {
+    if (!isLive) {
+        await Tone.start();
+        try {
+            await mic.open();
+            isLive = true;
+            this.classList.add("live-active");
+            document.getElementById("tigerMascot").classList.add("playing");
+            document.getElementById("status").innerText = "ĐANG LIVE...";
+
+            liveNodes = createChain(Tone.Destination);
+            mic.connect(micGain);
+            micGain.connect(liveNodes[0]);
+        } catch {
+            alert("Không truy cập được Micro");
+        }
+    } else {
+        isLive = false;
+        this.classList.remove("live-active");
+        document.getElementById("tigerMascot").classList.remove("playing");
+        document.getElementById("status").innerText = "Đã tắt Live";
+
+        mic.close();
+        micGain.disconnect();
+        liveNodes.forEach(n => n.dispose());
+        liveNodes = [];
+    }
+};
+
+// PWA Service Worker
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js");
+    });
+}
+</script>
+
+</body>
+</html>
