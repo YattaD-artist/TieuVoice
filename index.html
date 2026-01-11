@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <title>Tiêu Meow Live</title>
 
+    <!-- PWA -->
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <meta name="theme-color" content="#ff9800">
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -21,7 +21,6 @@
             align-items: center;
             height: 100vh;
         }
-
         .card {
             background: #1a1a1a;
             padding: 2.5rem;
@@ -31,7 +30,6 @@
             border: 1px solid #333;
             box-shadow: 0 20px 50px rgba(0,0,0,0.5);
         }
-
         h1 {
             color: #ff9800;
             font-size: 1.1rem;
@@ -39,14 +37,12 @@
             letter-spacing: 2px;
             text-transform: uppercase;
         }
-
         .controls-row {
             display: flex;
             justify-content: space-around;
             align-items: center;
             margin-bottom: 1.5rem;
         }
-
         .tiger-btn {
             width: 100px;
             height: 100px;
@@ -59,7 +55,6 @@
             border: 4px solid #333;
             user-select: none;
         }
-
         .circle-btn {
             width: 60px;
             height: 60px;
@@ -75,49 +70,21 @@
             align-items: center;
             transition: 0.3s;
         }
-
         .live-active {
             background: #ff9800 !important;
             color: #000 !important;
             box-shadow: 0 0 20px rgba(255,152,0,0.6);
         }
-
         .playing {
             animation: pulse 1s infinite;
             border-color: #ff9800;
         }
-
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(255,152,0,0.4); }
             70% { box-shadow: 0 0 0 20px rgba(255,152,0,0); }
             100% { box-shadow: 0 0 0 0 rgba(255,152,0,0); }
         }
-
-        /* Phần mới bổ sung */
-        .output-section {
-            margin-top: 15px;
-            text-align: left;
-        }
-        .output-label {
-            font-size: 10px;
-            color: #888;
-            margin-bottom: 5px;
-            text-transform: uppercase;
-        }
-        #outputSelector {
-            width: 100%;
-            background: #252525;
-            color: #ff9800;
-            border: 1px solid #444;
-            padding: 8px;
-            border-radius: 10px;
-            font-size: 12px;
-            outline: none;
-            cursor: pointer;
-        }
-
         #status {
-            margin-top: 15px;
             font-size: 0.75rem;
             color: #ff9800;
         }
@@ -134,102 +101,83 @@
         <div class="tiger-btn" id="tigerMascot">🐯</div>
     </div>
 
-    <div class="output-section">
-        <div class="output-label">Đầu ra âm thanh:</div>
-        <select id="outputSelector">
-            <option value="">Đang quét thiết bị...</option>
-        </select>
-    </div>
-
     <div id="status">Sẵn sàng</div>
 </div>
 
 <script>
+/* ===== CONFIG TỐI ƯU MÔI TRƯỜNG ỒN ===== */
 const CONFIG = {
-    gate: -45,
+    micGain: 2.5,
+    gate: -28,          // Gate mạnh hơn
+    highpass: 180,      // Cắt tiếng trầm xa
+    compThreshold: -24,
+    compRatio: 4,
     pitch: 8,
     vibFreq: 4,
-    vibDepth: 0.8,
-    reverbWet: 0.15,
-    micGain: 3.5 // Tăng gain nhẹ để mic nhạy hơn
+    vibDepth: 0.7,
+    reverbWet: 0.1
 };
 
 let isLive = false;
+
 const mic = new Tone.UserMedia();
 const micGain = new Tone.Gain(CONFIG.micGain);
 let liveNodes = [];
 
-// Hàm liệt kê các loa/cáp ảo
-async function updateOutputDevices() {
-    try {
-        // Buộc trình duyệt hỏi quyền Mic để hiện danh sách thiết bị
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const selector = document.getElementById("outputSelector");
-        selector.innerHTML = "";
-
-        const outputs = devices.filter(device => device.kind === "audiooutput");
-        
-        outputs.forEach(device => {
-            const option = document.createElement("option");
-            option.value = device.deviceId;
-            option.text = device.label || `Loa ${selector.length + 1}`;
-            selector.appendChild(option);
-        });
-
-        // Tự động chọn CABLE Input nếu tìm thấy
-        for (let i = 0; i < selector.options.length; i++) {
-            if (selector.options[i].text.includes("CABLE Input")) {
-                selector.selectedIndex = i;
-                break;
-            }
-        }
-    } catch (err) {
-        document.getElementById("status").innerText = "Lỗi: Hãy cấp quyền Micro";
-    }
-}
-
-// Gọi quét thiết bị khi web load
-updateOutputDevices();
-
+/* ===== CHAIN LỌC TỐI ƯU =====
+HighPass → Gate → Compressor → FX → Output
+*/
 function createChain(destination) {
+    const highpass = new Tone.Filter(CONFIG.highpass, "highpass");
     const gate = new Tone.Gate(CONFIG.gate);
+
+    const compressor = new Tone.Compressor({
+        threshold: CONFIG.compThreshold,
+        ratio: CONFIG.compRatio,
+        attack: 0.01,
+        release: 0.2
+    });
+
     const pitch = new Tone.PitchShift(CONFIG.pitch);
     const vibrato = new Tone.Vibrato(CONFIG.vibFreq, CONFIG.vibDepth);
     const chorus = new Tone.Chorus(4, 2.5, 0.5).start();
-    const filter = new Tone.Filter(2200, "lowpass");
+    const lowpass = new Tone.Filter(2200, "lowpass");
     const reverb = new Tone.Reverb({ decay: 1.5, wet: CONFIG.reverbWet });
 
-    gate.chain(pitch, vibrato, chorus, filter, reverb, destination);
-    return [gate, pitch, vibrato, chorus, filter, reverb];
+    highpass.chain(
+        gate,
+        compressor,
+        pitch,
+        vibrato,
+        chorus,
+        lowpass,
+        reverb,
+        destination
+    );
+
+    return [highpass, gate, compressor, pitch, vibrato, chorus, lowpass, reverb];
 }
 
 document.getElementById("liveBtn").onclick = async function () {
     if (!isLive) {
         await Tone.start();
         try {
-            const selector = document.getElementById("outputSelector");
-            
-            // THIẾT LẬP ĐẦU RA: Trỏ âm thanh sang thiết bị đã chọn (CABLE Input)
-            if (typeof Tone.getContext().rawContext.setSinkId === 'function') {
-                await Tone.getContext().rawContext.setSinkId(selector.value);
-            }
-
             await mic.open();
             isLive = true;
+
             this.classList.add("live-active");
             document.getElementById("tigerMascot").classList.add("playing");
-            document.getElementById("status").innerText = "ĐANG LIVE SANG CÁP ẢO...";
+            document.getElementById("status").innerText = "ĐANG LIVE...";
 
             liveNodes = createChain(Tone.Destination);
             mic.connect(micGain);
             micGain.connect(liveNodes[0]);
-        } catch (e) {
-            console.error(e);
-            alert("Không truy cập được Micro hoặc Thiết bị đầu ra");
+        } catch {
+            alert("Không truy cập được Micro");
         }
     } else {
         isLive = false;
+
         this.classList.remove("live-active");
         document.getElementById("tigerMascot").classList.remove("playing");
         document.getElementById("status").innerText = "Đã tắt Live";
@@ -241,7 +189,7 @@ document.getElementById("liveBtn").onclick = async function () {
     }
 };
 
-// PWA Service Worker
+/* Service Worker */
 if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
         navigator.serviceWorker.register("./sw.js");
