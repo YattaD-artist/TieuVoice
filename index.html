@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <title>Tiêu Meow Live</title>
 
-    <!-- PWA -->
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <meta name="theme-color" content="#ff9800">
@@ -94,7 +93,31 @@
             100% { box-shadow: 0 0 0 0 rgba(255,152,0,0); }
         }
 
+        /* Phần mới bổ sung */
+        .output-section {
+            margin-top: 15px;
+            text-align: left;
+        }
+        .output-label {
+            font-size: 10px;
+            color: #888;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        #outputSelector {
+            width: 100%;
+            background: #252525;
+            color: #ff9800;
+            border: 1px solid #444;
+            padding: 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+        }
+
         #status {
+            margin-top: 15px;
             font-size: 0.75rem;
             color: #ff9800;
         }
@@ -111,6 +134,13 @@
         <div class="tiger-btn" id="tigerMascot">🐯</div>
     </div>
 
+    <div class="output-section">
+        <div class="output-label">Đầu ra âm thanh:</div>
+        <select id="outputSelector">
+            <option value="">Đang quét thiết bị...</option>
+        </select>
+    </div>
+
     <div id="status">Sẵn sàng</div>
 </div>
 
@@ -121,14 +151,46 @@ const CONFIG = {
     vibFreq: 4,
     vibDepth: 0.8,
     reverbWet: 0.15,
-    micGain: 3.0
+    micGain: 3.5 // Tăng gain nhẹ để mic nhạy hơn
 };
 
 let isLive = false;
-
 const mic = new Tone.UserMedia();
 const micGain = new Tone.Gain(CONFIG.micGain);
 let liveNodes = [];
+
+// Hàm liệt kê các loa/cáp ảo
+async function updateOutputDevices() {
+    try {
+        // Buộc trình duyệt hỏi quyền Mic để hiện danh sách thiết bị
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const selector = document.getElementById("outputSelector");
+        selector.innerHTML = "";
+
+        const outputs = devices.filter(device => device.kind === "audiooutput");
+        
+        outputs.forEach(device => {
+            const option = document.createElement("option");
+            option.value = device.deviceId;
+            option.text = device.label || `Loa ${selector.length + 1}`;
+            selector.appendChild(option);
+        });
+
+        // Tự động chọn CABLE Input nếu tìm thấy
+        for (let i = 0; i < selector.options.length; i++) {
+            if (selector.options[i].text.includes("CABLE Input")) {
+                selector.selectedIndex = i;
+                break;
+            }
+        }
+    } catch (err) {
+        document.getElementById("status").innerText = "Lỗi: Hãy cấp quyền Micro";
+    }
+}
+
+// Gọi quét thiết bị khi web load
+updateOutputDevices();
 
 function createChain(destination) {
     const gate = new Tone.Gate(CONFIG.gate);
@@ -146,17 +208,25 @@ document.getElementById("liveBtn").onclick = async function () {
     if (!isLive) {
         await Tone.start();
         try {
+            const selector = document.getElementById("outputSelector");
+            
+            // THIẾT LẬP ĐẦU RA: Trỏ âm thanh sang thiết bị đã chọn (CABLE Input)
+            if (typeof Tone.getContext().rawContext.setSinkId === 'function') {
+                await Tone.getContext().rawContext.setSinkId(selector.value);
+            }
+
             await mic.open();
             isLive = true;
             this.classList.add("live-active");
             document.getElementById("tigerMascot").classList.add("playing");
-            document.getElementById("status").innerText = "ĐANG LIVE...";
+            document.getElementById("status").innerText = "ĐANG LIVE SANG CÁP ẢO...";
 
             liveNodes = createChain(Tone.Destination);
             mic.connect(micGain);
             micGain.connect(liveNodes[0]);
-        } catch {
-            alert("Không truy cập được Micro");
+        } catch (e) {
+            console.error(e);
+            alert("Không truy cập được Micro hoặc Thiết bị đầu ra");
         }
     } else {
         isLive = false;
